@@ -2721,6 +2721,9 @@ void drawMenu() {
 
   M5.Display.setTextSize(menuTextSize);
   M5.Display.setTextFont(1);
+  // Long labels must clip at the right edge, not wrap onto the next row
+  // (at zoom 2.0x/2.5x a wrapped line overlapped the item below).
+  M5.Display.setTextWrap(false);
 
   const int startX = 5;
   const int startY = 10;
@@ -2748,6 +2751,8 @@ void drawMenu() {
     M5.Display.setCursor(startX, y);
     M5.Display.println((const char*)menuItems[menuIndex]);
   }
+
+  M5.Display.setTextWrap(true);  // restore default for the rest of the UI
 
   // Barre Search inchangée
   if (menuMode == MENU_SEARCH) drawSearchBar();
