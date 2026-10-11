@@ -2128,6 +2128,7 @@ void setup() {
   restoreConfigParameter("casetostartatboot");
   restoreConfigParameter("boot_countdown");
   restoreConfigParameter("totem_name");
+  restoreConfigParameter("menuZoomLevel");
   int textY = 30;
   int lineOffset = 10;
   int lineY1 = textY - lineOffset;
@@ -2717,6 +2718,7 @@ void applyMenuZoomLayout() {
 void cycleMenuZoom() {
   menuZoomLevel = (menuZoomLevel + 1) % 3;  // 0->1->2->0
   applyMenuZoomLayout();
+  saveConfigParameter("menuZoomLevel", menuZoomLevel);  // remember across reboots
   lastIndex = -1; // force redraw dans loop (comme ton code le fait déjà)
   drawMenu();
 }
@@ -2807,6 +2809,9 @@ void drawMenu() {
       M5.Display.fillRect(0, 1 + startY + i * menuLineH,
                           M5.Display.width(), menuLineH,
                           menuSelectedBackgroundColor);
+      // 2px focus edge: reads faster than the fill alone, esp. on grey themes.
+      M5.Display.fillRect(0, 1 + startY + i * menuLineH, 2, menuLineH,
+                          menuTextFocusedColor);
       M5.Display.setTextColor(menuTextFocusedColor);
     } else {
       M5.Display.setTextColor(menuTextUnFocusedColor);
@@ -2817,6 +2822,19 @@ void drawMenu() {
 
     drawMenuLabel(startX, y, M5.Display.width(),
                   (const char*)menuItems[menuIndex], pos == currentIndex);
+  }
+
+  // Scroll position rail on the right edge, drawn over the rows so it sits on
+  // top of the selected bar. Only shown when the list is longer than the view.
+  if (total > maxMenuDisplay) {
+    const int railX = M5.Display.width() - 2;
+    int thumbH = (listH * maxMenuDisplay) / total;
+    if (thumbH < 6) thumbH = 6;
+    const int denom = total - maxMenuDisplay;
+    const int thumbY = MENU_TOP_Y +
+                       (denom > 0 ? ((listH - thumbH) * menuStartIndex) / denom : 0);
+    M5.Display.fillRect(railX, MENU_TOP_Y, 2, listH, menuSelectedBackgroundColor); // track
+    M5.Display.fillRect(railX, thumbY, 2, thumbH, menuTextFocusedColor);           // thumb
   }
 
   M5.Display.setTextWrap(true);  // restore default for the rest of the UI
@@ -8699,6 +8717,11 @@ void restoreConfigParameter(String key) {
           } else if (key == "totem_name") {
             stringValue.toCharArray(totem_device_name, TOTEM_NAME_MAX + 1);
             Serial.println("Totem name restored to " + String(totem_device_name));
+          } else if (key == "menuZoomLevel") {
+            intValue = stringValue.toInt();
+            menuZoomLevel = (intValue >= 0 && intValue <= 2) ? (uint8_t)intValue : 0;
+            // Layout is (re)applied by drawMenu()'s applyMenuZoomLayout().
+            Serial.println("Menu zoom restored to level " + String(menuZoomLevel));
           } else if (key == "portal_file") {
             String v = stringValue;
             if (!v.startsWith("/evil/sites/")) v = "/evil/sites/" + v;
