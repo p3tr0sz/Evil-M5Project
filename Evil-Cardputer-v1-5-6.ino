@@ -411,6 +411,13 @@ static uint8_t menuZoomLevel = 0;     // 0=1.5, 1=2.0, 2=2.5
 static float   menuTextSize  = 1.5f;  // appliqué dans drawMenu()
 static int     menuLineH     = 13;    // hauteur ligne en pixels
 
+// Marquee state for long menu labels: the focused label scrolls horizontally
+// while it overflows its row (idle rows get a ".." ellipsis instead of a hard
+// clip). drawMenu() sets menuFocusMarquee; loop() keeps repainting while true.
+static bool          menuFocusMarquee       = false;
+static unsigned long lastMenuMarqueeTime    = 0;
+static const unsigned long MENU_MARQUEE_INTERVAL = 40; // ms per step (~25 fps)
+
 static const int MENU_TOP_Y = 13;       // zone menu commence sous la taskbar :contentReference[oaicite:2]{index=2}
 static const float SEARCH_TEXT_SIZE = 1.5f;  // taille fixe de la barre
 static const int   SEARCH_BAR_H     = 13;    // hauteur fixe cohérente avec 1.5
@@ -2513,6 +2520,12 @@ void loop() {
     if (lastIndex != currentIndex) {
       drawMenu();
       lastIndex = currentIndex;
+    } else if (menuFocusMarquee &&
+               currentMillis - lastMenuMarqueeTime >= MENU_MARQUEE_INTERVAL) {
+      // Selection unchanged but the focused label overflows: repaint to
+      // advance the horizontal marquee (offset is derived from millis()).
+      lastMenuMarqueeTime = currentMillis;
+      drawMenu();
     }
     handleMenuInput();
   } else {
@@ -2709,6 +2722,56 @@ void cycleMenuZoom() {
 }
 
 //-----------------------------------------------------------------------------------------------------
+// Draw one menu label on its row. Labels that fit are printed as-is. A label
+// that is too wide is scrolled horizontally (ping-pong) while it is the focused
+// item, and truncated with ".." while idle, so text is never silently cut
+// mid-glyph. The caller must already have set the text size/font and
+// setTextWrap(false). Sets menuFocusMarquee so loop() keeps the scroll running.
+void drawMenuLabel(int x, int y, int rowRight, const char* label, bool focused) {
+  const int avail = rowRight - x - 4;        // usable width for text
+  const int textW = M5.Display.textWidth(label);
+
+  if (textW <= avail) {                      // fits: print normally
+    M5.Display.setCursor(x, y);
+    M5.Display.print(label);
+    return;
+  }
+
+  if (!focused) {                            // idle row: truncate with ".."
+    String s(label);
+    while (s.length() > 1 &&
+           M5.Display.textWidth((s + "..").c_str()) > avail) {
+      s.remove(s.length() - 1);
+    }
+    M5.Display.setCursor(x, y);
+    M5.Display.print((s + "..").c_str());
+    return;
+  }
+
+  // Focused row: horizontal ping-pong marquee, clipped to the row so the
+  // scrolling text cannot bleed into neighbouring items.
+  menuFocusMarquee = true;                   // ask loop() to keep repainting
+  const int span   = textW - avail + 8;      // px of travel (8px tail margin)
+  const int MP     = 2;                       // px moved per step
+  const int steps  = (span + MP - 1) / MP;    // steps to cross once
+  const int PAUSE  = 20;                       // steps paused at each end (~0.8s)
+  const int period = steps * 2 + PAUSE * 2;
+  const int t      = (int)((millis() / MENU_MARQUEE_INTERVAL) % period);
+  int sIdx;
+  if      (t < PAUSE)               sIdx = 0;            // dwell, fully left
+  else if (t < PAUSE + steps)       sIdx = t - PAUSE;    // scroll left
+  else if (t < PAUSE * 2 + steps)   sIdx = steps;        // dwell, fully right
+  else                              sIdx = period - t;   // scroll back right
+  int off = sIdx * MP;
+  if (off > span) off = span;
+
+  M5.Display.setClipRect(x, y - 1, avail, menuLineH);
+  M5.Display.setCursor(x - off, y);
+  M5.Display.print(label);
+  M5.Display.clearClipRect();
+}
+
+//-----------------------------------------------------------------------------------------------------
 void drawMenu() {
   // Toujours recalculer le layout ici (au cas où on entre/sort de SEARCH)
   applyMenuZoomLayout();
@@ -2728,7 +2791,11 @@ void drawMenu() {
   const int startX = 5;
   const int startY = 10;
 
-  const int total = viewCount();  // respecte SEARCH + lock 
+  const int total = viewCount();  // respecte SEARCH + lock
+
+  // Recomputed each frame; set true by drawMenuLabel() when the focused label
+  // overflows and needs the marquee to keep scrolling.
+  menuFocusMarquee = false;
 
   for (int i = 0; i < maxMenuDisplay; ++i) {
     int pos = menuStartIndex + i;
@@ -2748,8 +2815,8 @@ void drawMenu() {
     int y = startY + i * menuLineH + (menuLineH / 2) - 3;
     if (y < MENU_TOP_Y) y = MENU_TOP_Y;
 
-    M5.Display.setCursor(startX, y);
-    M5.Display.println((const char*)menuItems[menuIndex]);
+    drawMenuLabel(startX, y, M5.Display.width(),
+                  (const char*)menuItems[menuIndex], pos == currentIndex);
   }
 
   M5.Display.setTextWrap(true);  // restore default for the rest of the UI
